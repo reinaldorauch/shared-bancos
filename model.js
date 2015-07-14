@@ -43,6 +43,13 @@
     new Client()
   ];
 
+  /**
+   * Indica se há uma transação em andamento ou não. Se sim, contêm o id da
+   * transação, se não é nulo
+   * @type {String|null}
+   */
+  var transactionId = null;
+
   //////////////////////////
   // Exporting the module //
   /////////////////////////
@@ -79,6 +86,18 @@
     }
   }
 
+  GlobalId.prototype.toString = function globalIdToString() {
+    return format('%d-%d', this.agencia, this.conta);
+  }
+
+  function TransactionError () {
+    this.name = 'TransactionError';
+    this.message = msg;
+    this.stack = Error.prototype.stack;
+  }
+
+  TransactionError.prototype = Error.prototype;
+
   //////////////////////////////
   // Function implementations //
   //////////////////////////////
@@ -94,15 +113,17 @@
     orig = new GlobalId(orig);
     dest = new GlobalId(dest);
 
-    return connect(orig)
-      .then(connect(dest))
-      .then(startTransaction(orig, dest))
-      .then(checkAccountExists(orig))
-      .then(checkAccountExists(dest))
-      .then(checkSaldo(orig))
+    return startTransaction()
+      .then(q.all([connect(orig), connect(dest)]))
+      .then(q.all([startTransactionDb(orig, transactionId), startTransactionDb(dest, transactionId)]))
+      .then(q.all([checkAccountExists(orig), checkAccountExists(dest)]))
+      .then(checkSaldo(orig, val))
       .then(doTransfer(orig, dest, val))
-      .then(commitTransfer(orig, dest))
-      .then(closeConnections(orig, dest));
+      .then(q.all([endTransaction(orig), endTransaction(dest)]))
+      .then(q.all([prepareTransaction(orig), prepareTransaction(dest)]))
+      .then(q.all([commitTransaction(orig), commitTransaction(dest)]))
+      .then(closeConnections(orig, dest))
+      ['catch'](rollbackTransactions.bind(null, orig, dest));
   }
 
   /**
@@ -115,19 +136,22 @@
     var client = conex[acc.agencia];
     var db = dbs[acc.agencia];
 
-    client.connect(db);
-
     client.on('connect', function  () {
+      console.log('Connected to the database', db);
       def.resolve(client);
     });
 
     client.on('error', function (err) {
+      console.log('Error on connecting to the database:', err.message);
+      console.log(err.trace);
       def.reject(err);
     });
 
     client.on('close', function () {
       console.log('Client closed');
     });
+
+    client.connect(db);
 
     return def.promise;
   }
@@ -139,12 +163,152 @@
    * @return {[type]}      [description]
    */
   function startTransaction (orig, dest) {
-    var transId = String(date.getTime());
+    return q.Promise(function (resolve, reject) {
+      if(transactionId !== null) {
+        return reject(new TransactionError('A transaction is in already effect'));
+      }
 
-    orig = conex[orig.agencia];
-    dest = conex[orig.agencia];
+      transactionId = String(new Date().getTime());
 
+      console.log('Starting transaction with id:', transactionId);
 
+      resolve();
+    });
+  }
+
+  function runQuery (conn, query, params) {
+    var def = q.defer();
+    query = conn.query(query, params);
+
+    query.on('result', function (res) {
+      var result = [];
+      res.on('row', function  (row) {
+        console.log(row);
+        def.notify(row);
+        result.push(row);
+      });
+
+      res.on('error', function (err) {
+        def.reject(err);
+      });
+
+      res.on('end', function () {
+        def.resolve(result);
+      });
+    });
+
+    query.on('error', function (err) {
+      def.reject(err);
+    });
+
+    return def.promise;
+  }
+
+  /**
+   * [startTransactionDb description]
+   * @param  {[type]} conn [description]
+   * @param  {[type]} id   [description]
+   * @return {[type]}      [description]
+   */
+  function startTransactionDb (acc, id) {
+    var conn = conex[acc.agencia];
+    var query = 'XA START :id';
+    var data = {id: id};
+    return runQuery(conn, query, data);
+  }
+
+  function checkAccountExists (id) {
+    return runQuery(conex[id.agencia], 'SELECT (COUNT(*) = 1) as exists FROM contas WHERE id = :id', {id: id.conta})
+      .then(function (result) {
+        var exists = Boolean(Number(result[0].exists));
+        if(!exists) {
+          throw new TransactionError('Account ' + id.toString() + ' does not exist');
+        } else {
+          return exists;
+        }
+      });
+  }
+
+  function checkSaldo (acc, val) {
+    var db = conex[acc.agencia];
+    var query = 'SELECT (saldo > :val) as hasSaldo FROM contas WHERE id = :id';
+    var data = { val: val, id: acc.conta };
+    return runQuery(db, query, data)
+      .then(function (res) {
+        var hasSaldo = Boolean(Number(result[0].hasSaldo));
+        if(!hasSaldo) {
+          throw new TransactionError('A conta ' + id.toString() + ' não tem saldo para bancar ' + val + ' para a transferência');
+        } else {
+          return hasSaldo;
+        }
+      });
+  }
+
+  function doTransfer (orig, dest, val) {
+    return q.all([removesFrom(orig, val), addsTo(dest, val)]);
+  }
+
+  function removesFrom (acc, val) {
+    var db = conex[acc.agencia];
+    var query = 'UPDATE contas SET saldo = (saldo - :val) WHERE id = :id';
+    var data = { val: val, id: acc.conta };
+    return runQuery(db, query, data);
+  }
+
+  function addsTo (acc, val) {
+    var db = conex[acc.agencia];
+    var query = 'UPDATE contas SET saldo = (saldo + :val) WHERE id = :id';
+    var data = { val: val, id: acc.conta };
+    return runQuery(db, query, data);
+  }
+
+  function endTransaction (acc) {
+    console.log('Ending transaction', transactionId);
+    var db = conex[acc.agencia];
+    var data = { id: transactionId };
+    return runQuery(db, 'XA END :id', data);
+  }
+
+  function prepareTransaction (acc) {
+    console.log('Preparing transaction', transactionId);
+    var db = conex[acc.agencia];
+    var data = { id: transactionId };
+    return runQuery(db, 'XA PREPARE :id', data);
+  }
+
+  function commitTransaction (acc) {
+    console.log('Commiting transaction', transactionId);
+    var db = conex[acc.agencia];
+    var data = { id: transactionId };
+    return runQuery(db, 'XA COMMIT :id', data);
+  }
+
+  function closeConnections (orig, dest) {
+    return q.Promise(function (resolve, reject) {
+      try {
+        transactionId = null;
+        conex[orig.agencia].end();
+        conex[dest.agencia].end();
+      } catch(e) {
+        return reject(e);
+      }
+
+      resolve({ success: true });
+    });
+  }
+
+  function rollbackTransactions (orig, dest, err) {
+    console.log(err.trace);
+    console.log('Rolling back transaction');
+    transactionId = null;
+    var data = { id: transactionId };
+    var query ='XA ROLLBACK :id';
+    return q.all([
+      runQuery(conex[orig.agencia], query, data),
+      runQuery(conex[dest.agencia], query, data)
+    ]).then(function () {
+      throw err;
+    });
   }
 
 })();
