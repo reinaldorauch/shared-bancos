@@ -21,6 +21,7 @@
   "homepage": "https://github.com/reinaldorauch/shared-bancos#readme",
   "dependencies": {
     "mariasql": "^0.1.23",
+    "mysql": "^2.8.0",
     "q": "^1.4.1",
     "restify": "^3.0.3"
   }

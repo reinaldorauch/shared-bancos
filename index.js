@@ -25,10 +25,11 @@
       .then(function () {
         var ret = { msg: 'Sucesso.' };
         res.json(200, ret);
-      })['catch'](function (err) {
-        console.error(err.message);
-        console.error(err.stack);
-        res.json(500, err);
+      }).catch(function (err) {
+        console.log(err);
+        setImmediate(function () {
+          res.json(500, err);
+        });
       });
   }
 
