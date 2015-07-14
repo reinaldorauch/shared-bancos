@@ -22,11 +22,12 @@
     console.log('Valor: ', req.params.valor);
 
     model.transfer(req.params.idOrig, req.params.idDest, req.params.valor)
-      .then(function (ret) {
-        ret.msg = 'Sucesso.';
+      .then(function () {
+        var ret = { msg: 'Sucesso.' };
         res.json(200, ret);
       })['catch'](function (err) {
         console.error(err.message);
+        console.error(err.stack);
         res.json(500, err);
       });
   }
