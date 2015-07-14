@@ -120,7 +120,10 @@
         return checkSaldo(orig, val);
       })
       .then(function () {
-        return doTransfer(orig, dest, val);
+        return removesFrom(orig, val);
+      })
+      .then(function () {
+        return addsTo(dest, val);
       })
       .then(function () {
         return endTransaction(orig);
@@ -171,7 +174,13 @@
   function runQuery (conn, queryStr, params) {
     var def = q.defer();
 
-    conn.query(queryStr, params, def.makeNodeResolver());
+    conn.query(queryStr, params, function (err, res) {
+      if(err) {
+        def.reject(err);
+      } else {
+        def.resolve(res);
+      }
+    });
 
     return def.promise;
   }
@@ -194,7 +203,7 @@
     var query = 'SELECT (COUNT(*) = 1) as hasConta FROM contas WHERE id = ?';
     return runQuery(conn, query, [id.conta])
       .then(function (result) {
-        var exists = Boolean(Number(result[0].hasContas));
+        var exists = Boolean(Number(result[0].hasConta));
         if(!exists) {
           throw new TransactionError('Account ' + id.toString() + ' does not exist');
         } else {
@@ -208,24 +217,20 @@
     var query = 'SELECT (saldo > ?) as hasSaldo FROM contas WHERE id = ?';
     var data = [val, acc.conta];
     return runQuery(db, query, data)
-      .then(function (res) {
+      .then(function (result) {
         var hasSaldo = Boolean(Number(result[0].hasSaldo));
         if(!hasSaldo) {
-          throw new TransactionError('A conta ' + id.toString() + ' não tem saldo para bancar ' + val + ' para a transferência');
+          throw new TransactionError('A conta ' + acc.toString() + ' não tem saldo para bancar ' + val + ' para a transferência');
         } else {
           return hasSaldo;
         }
       });
   }
 
-  function doTransfer (orig, dest, val) {
-    return q.allSettled([removesFrom(orig, val), addsTo(dest, val)]);
-  }
-
   function removesFrom (acc, val) {
     var db = conex[acc.agencia];
     var query = 'UPDATE contas SET saldo = (saldo - ?) WHERE id = ?';
-    var data = [val, acc.conta];
+    var data = [val, acc.conta];''
     return runQuery(db, query, data);
   }
 
