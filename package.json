@@ -1,0 +1,27 @@
+{
+  "name": "shared-bancos",
+  "version": "1.0.0",
+  "description": "Exercício de transações distribuídas",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "node index"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/reinaldorauch/shared-bancos.git"
+  },
+  "author": "Reinaldo A. C. Rauch <reinaldorauch@gmail.com>",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/reinaldorauch/shared-bancos/issues"
+  },
+  "homepage": "https://github.com/reinaldorauch/shared-bancos#readme",
+  "dependencies": {
+    "mariasql": "^0.1.23",
+    "q": "^1.4.1",
+    "restify": "^3.0.3"
+  }
+}
