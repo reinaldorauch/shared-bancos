@@ -105,10 +105,14 @@
 
     return startTransaction()
       .then(function () {
-        return startTransactionDb(orig, transactionId);
-      })
-      .then(function () {
-        return startTransactionDb(dest, transactionId);
+        if(orig.agencia === dest.agencia) {
+          return startTransactionDb(orig, transactionId);
+        } else {
+          return startTransactionDb(orig, transactionId)
+            .then(function () {
+              return startTransactionDb(dest, transactionId);
+            });
+        }
       })
       .then(function () {
         return checkAccountExists(orig);
@@ -126,22 +130,34 @@
         return addsTo(dest, val);
       })
       .then(function () {
-        return endTransaction(orig);
+        if(orig.agencia === dest.agencia) {
+          return endTransaction(orig, transactionId);
+        } else {
+          return endTransaction(orig, transactionId)
+            .then(function () {
+              return endTransaction(dest, transactionId);
+            });
+        }
       })
       .then(function () {
-        return endTransaction(dest);
+        if(orig.agencia === dest.agencia) {
+          return prepareTransaction(orig, transactionId);
+        } else {
+          return prepareTransaction(orig, transactionId)
+            .then(function () {
+              return prepareTransaction(dest, transactionId);
+            });
+        }
       })
       .then(function () {
-        return prepareTransaction(orig);
-      })
-      .then(function () {
-        return prepareTransaction(dest);
-      })
-      .then(function () {
-        return commitTransaction(orig);
-      })
-      .then(function () {
-        return commitTransaction(dest);
+        if(orig.agencia === dest.agencia) {
+          return commitTransaction(orig, transactionId);
+        } else {
+          return commitTransaction(orig, transactionId)
+            .then(function () {
+              return commitTransaction(dest, transactionId);
+            });
+        }
       })
       .then(function () {
         return closeConnections(orig, dest);
@@ -266,8 +282,6 @@
     return q.Promise(function (resolve, reject) {
       try {
         transactionId = null;
-        conex[orig.agencia].end();
-        conex[dest.agencia].end();
       } catch(e) {
         return reject(e);
       }
@@ -282,19 +296,29 @@
     var data = [transactionId];
     var query = 'XA ROLLBACK ?';
 
-    return endTransaction(orig)
+    var promise = endTransaction(orig)
       .then(function () {
         return runQuery(conex[orig.agencia], query, data);
-      })
-      .then(function () {
-        return endTransaction(dest);
-      })
-      .then(function () {
-        return runQuery(conex[dest.agencia], query, data)
-      }).then(function () {
-        transactionId = null;
-        throw err;
       });
+
+    if(orig.agencia === dest.agencia) {
+      transactionId = null;
+      return promise
+        .then(function () {
+          throw err;
+        });
+    } else {
+      return promise
+        .then(function () {
+          return endTransaction(dest);
+        })
+        .then(function () {
+          return runQuery(conex[dest.agencia], query, data)
+        }).then(function () {
+          transactionId = null;
+          throw err;
+        });
+    }
   }
 
 })();
